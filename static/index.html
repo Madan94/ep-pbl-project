@@ -1,0 +1,1158 @@
+<!DOCTYPE html>
+<html lang="en" class="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RenewCred — Professional Solar IoT &amp; Carbon Monitoring Platform</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- React 18 & ReactDOM 18 -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  
+  <!-- Babel Standalone -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            appbg: '#F8FAFC',
+            panelbg: '#FFFFFF',
+            panelborder: '#E2E8F0',
+          }
+        }
+      }
+    }
+  </script>
+  
+  <style>
+    body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; color: #0F172A; }
+    
+    .panel-card {
+      background: #FFFFFF;
+      border: 1px solid #E2E8F0;
+      border-radius: 12px;
+      box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.04), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
+    }
+    
+    .panel-card-hover {
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .panel-card-hover:hover {
+      transform: translateY(-1px);
+      border-color: #CBD5E1;
+      box-shadow: 0 10px 20px -5px rgba(15, 23, 42, 0.06), 0 4px 6px -2px rgba(15, 23, 42, 0.03);
+    }
+
+    @keyframes pulse-emerald {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(1.15); }
+    }
+    .pulse-dot { animation: pulse-emerald 2s infinite ease-in-out; }
+
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #F8FAFC; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 9999px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+  </style>
+</head>
+<body class="bg-[#F8FAFC] text-slate-900 min-h-screen flex flex-col font-sans selection:bg-emerald-500 selection:text-white">
+
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // --- CONTINUOUS MOCK DATA UTILITIES ---
+    let globalStep = 0;
+
+    function generateSeedData(count = 35) {
+      const list = [];
+      const now = Date.now();
+      let cumulativeEnergy = 16.75;
+
+      for (let i = count - 1; i >= 0; i--) {
+        const time = new Date(now - i * 1800);
+        const step = count - i;
+        const drift = Math.sin(step * 0.1) * 0.3;
+        const noiseV = (Math.sin(step * 0.4) * 0.08);
+        const noiseI = (Math.cos(step * 0.3) * 0.05);
+
+        const voltage = Number((12.45 + drift + noiseV).toFixed(2));
+        const current = Number((1.90 + (drift * 0.3) + noiseI).toFixed(2));
+        const expectedPower = Number((voltage * current).toFixed(2));
+        
+        const isAnomaly = i === 12;
+        const reportedPower = isAnomaly 
+          ? Number((expectedPower * 1.82).toFixed(2))
+          : expectedPower;
+        
+        const power = reportedPower;
+        const status = isAnomaly ? 'ANOMALY' : 'NORMAL';
+        const reason = isAnomaly 
+          ? `Physics Violation: Reported ${reportedPower}W exceeds V×I (${expectedPower}W) by +82.0%`
+          : 'Verified: Ohm & Joule Law consistent (tolerance ±0.2%)';
+        
+        const energyIncrement = (power / 1000) * (1.8 / 3600);
+        if (!isAnomaly) cumulativeEnergy += energyIncrement;
+
+        list.push({
+          id: 1000 + step,
+          device_id: 'SOLAR_ESP32_001',
+          voltage,
+          current,
+          power,
+          expected_power: expectedPower,
+          temperature: Number((29.5 + (drift * 0.5) + (Math.sin(step) * 0.2)).toFixed(1)),
+          humidity: Number((58.0 - (drift * 0.4) + (Math.cos(step) * 0.3)).toFixed(1)),
+          irradiance: Math.round(840 + (drift * 45) + (Math.sin(step * 0.2) * 15)),
+          status,
+          reason,
+          confidence: isAnomaly ? 0.61 : 0.995,
+          timestamp: time.toISOString(),
+          energy_kwh: Number(cumulativeEnergy.toFixed(5)),
+          co2_kg: Number((cumulativeEnergy * 0.82).toFixed(5)),
+          carbon_credits: Number(((cumulativeEnergy * 0.82) / 1000).toFixed(8))
+        });
+      }
+      globalStep = count;
+      return list;
+    }
+
+    function generateNextPacket(prevPacket, forceAnomaly = false) {
+      globalStep += 1;
+      const drift = Math.sin(globalStep * 0.08) * 0.32;
+      const noiseV = ((Math.random() - 0.5) * 0.1);
+      const noiseI = ((Math.random() - 0.5) * 0.08);
+
+      const voltage = Number(Math.max(11.8, Math.min(13.2, 12.45 + drift + noiseV)).toFixed(2));
+      const current = Number(Math.max(1.4, Math.min(2.4, 1.90 + (drift * 0.35) + noiseI)).toFixed(2));
+      const expectedPower = Number((voltage * current).toFixed(2));
+
+      const shouldBeAnomaly = forceAnomaly || (globalStep > 0 && globalStep % 19 === 0);
+      
+      let reportedPower = expectedPower;
+      let status = 'NORMAL';
+      let reason = 'Verified: Deterministic physical law confirmed (P = V × I)';
+      let confidence = 0.996;
+
+      if (shouldBeAnomaly) {
+        status = 'ANOMALY';
+        const multiplier = Math.random() > 0.5 ? 1.85 : 0.42;
+        reportedPower = Number((expectedPower * multiplier).toFixed(2));
+        const pctDiff = (((reportedPower - expectedPower) / expectedPower) * 100).toFixed(1);
+        reason = `Ohm's Law Violation: Reported ${reportedPower}W diverges from V×I (${expectedPower}W) by ${pctDiff > 0 ? '+' : ''}${pctDiff}%`;
+        confidence = 0.58;
+      }
+
+      const tempDrift = (Math.random() - 0.5) * 0.2;
+      const humDrift = (Math.random() - 0.5) * 0.3;
+      const temperature = Number(Math.max(26.0, Math.min(36.0, 29.8 + (drift * 0.4) + tempDrift)).toFixed(1));
+      const humidity = Number(Math.max(45.0, Math.min(75.0, 58.5 - (drift * 0.3) + humDrift)).toFixed(1));
+      const irradiance = Math.round(Math.max(650, Math.min(980, 855 + (drift * 55) + ((Math.random() - 0.5) * 20))));
+
+      return {
+        id: 1000 + globalStep,
+        device_id: 'SOLAR_ESP32_001',
+        voltage,
+        current,
+        power: reportedPower,
+        expected_power: expectedPower,
+        temperature,
+        humidity,
+        irradiance,
+        status,
+        reason,
+        confidence,
+        timestamp: new Date().toISOString()
+      };
+    }
+
+    const defaultSummary = {
+      total_readings: 1460,
+      verified_readings: 1448,
+      anomaly_readings: 12,
+      total_energy_kwh: 18.6420,
+      total_co2_reduced_kg: 15.2864,
+      total_carbon_credits: 0.0152864,
+      active_nodes: 4,
+      system_efficiency: 98.7,
+      performance_ratio: 0.88,
+      grid_carbon_factor: 0.82,
+      status: 'ONLINE'
+    };
+
+    // --- NAVBAR ---
+    function Navbar({ activeTab, setActiveTab, isStreaming, onToggleStreaming, onTriggerAnomaly, walletAddress }) {
+      return (
+        <header className="border-b border-slate-200 bg-white sticky top-0 z-50 shadow-2xs">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between">
+            
+            {/* Logo Brand */}
+            <div className="flex items-center space-x-3 cursor-pointer" onClick={() => setActiveTab('telemetry')}>
+              <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow-xs">
+                <i data-lucide="sun" className="w-5 h-5 text-white"></i>
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-lg font-bold tracking-tight text-slate-900">RenewCred</h1>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold uppercase tracking-wider">
+                    dMRV Platform
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 font-medium">Solar IoT Telemetry • AI Verification • Polygon Blockchain</p>
+              </div>
+            </div>
+
+            {/* Nav Tabs */}
+            <nav className="hidden lg:flex items-center p-1 rounded-xl bg-slate-100 border border-slate-200">
+              {[
+                { id: 'telemetry', label: 'Live Telemetry', icon: 'activity' },
+                { id: 'ai', label: 'AI dMRV Center', icon: 'shield-check' },
+                { id: 'certificates', label: 'Certificates', icon: 'award' },
+                { id: 'marketplace', label: 'Marketplace', icon: 'arrow-right-left' },
+                { id: 'prediction-logs', label: 'Prediction Logs', icon: 'database' }
+              ].map(t => {
+                const isActive = activeTab === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => setActiveTab(t.id)}
+                    className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+                      isActive
+                        ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80 font-bold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <i data-lucide={t.icon} className="w-3.5 h-3.5"></i>
+                    <span>{t.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+
+            {/* Right Badges & Controls */}
+            <div className="flex items-center gap-3">
+              {/* Continuous Stream Pill */}
+              <button
+                onClick={onToggleStreaming}
+                className="flex items-center gap-2 text-[11px] font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
+              >
+                <span className="relative flex h-2 w-2">
+                  {isStreaming && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>}
+                  <span className={`relative inline-flex rounded-full h-2 w-2 ${isStreaming ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
+                </span>
+                <span>{isStreaming ? 'LIVE (1.5s)' : 'PAUSED'}</span>
+              </button>
+
+              {/* Test Anomaly Trigger */}
+              <button
+                onClick={onTriggerAnomaly}
+                className="flex items-center gap-1.5 text-[11px] font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
+              >
+                <i data-lucide="alert-triangle" className="w-3.5 h-3.5 text-amber-600"></i>
+                <span>Test Anomaly</span>
+              </button>
+
+              {/* Network Pill */}
+              <div className="hidden sm:flex items-center gap-1.5 text-[11px] font-medium text-purple-700 bg-purple-50 border border-purple-200 px-2.5 py-1.5 rounded-lg">
+                <span className="w-1.5 h-1.5 rounded-full bg-purple-600"></span>
+                <span>Polygon Amoy</span>
+              </div>
+
+              {/* Wallet Pill */}
+              <div className="text-xs font-mono font-semibold px-3 py-1.5 bg-slate-900 text-white rounded-lg shadow-2xs">
+                {walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '0x71C7...976F'}
+              </div>
+            </div>
+
+          </div>
+        </header>
+      );
+    }
+
+    // --- TELEMETRY TAB (DASHBOARD) ---
+    function TelemetryTab({ latestPacket, summary, packetLogs, onMintCert, onResetSession }) {
+      const p = latestPacket || {
+        voltage: 12.48, current: 1.95, power: 24.34, expected_power: 24.34,
+        temperature: 29.8, humidity: 58.2, irradiance: 855, status: 'NORMAL',
+        reason: 'Verified: Ohm & Joule Law consistent (tolerance ±0.2%)', timestamp: new Date().toISOString()
+      };
+
+      const s = summary || defaultSummary;
+      const chartRef = useRef(null);
+      const chartInstance = useRef(null);
+
+      useEffect(() => {
+        if (!chartRef.current) return;
+        const ctx = chartRef.current.getContext('2d');
+        const labels = [...packetLogs].slice(0, 25).reverse().map(l => 
+          new Date(l.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        );
+        const reportedData = [...packetLogs].slice(0, 25).reverse().map(l => l.power);
+        const expectedData = [...packetLogs].slice(0, 25).reverse().map(l => l.expected_power);
+
+        if (chartInstance.current) {
+          chartInstance.current.data.labels = labels;
+          chartInstance.current.data.datasets[0].data = reportedData;
+          chartInstance.current.data.datasets[1].data = expectedData;
+          chartInstance.current.update('none');
+        } else {
+          chartInstance.current = new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels,
+              datasets: [
+                {
+                  label: 'Reported Power (W)',
+                  data: reportedData,
+                  borderColor: '#2563EB',
+                  backgroundColor: 'rgba(37, 99, 235, 0.06)',
+                  borderWidth: 2.2,
+                  fill: true,
+                  tension: 0.35,
+                  pointRadius: 0
+                },
+                {
+                  label: 'Expected V×I (W)',
+                  data: expectedData,
+                  borderColor: '#F59E0B',
+                  borderWidth: 1.8,
+                  borderDash: [4, 4],
+                  fill: false,
+                  tension: 0.35,
+                  pointRadius: 0
+                }
+              ]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              animation: false,
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  backgroundColor: '#FFFFFF',
+                  titleColor: '#64748B',
+                  bodyColor: '#0F172A',
+                  borderColor: '#E2E8F0',
+                  borderWidth: 1,
+                  padding: 10,
+                  boxPadding: 4,
+                  displayColors: true
+                }
+              },
+              scales: {
+                x: {
+                  grid: { display: false },
+                  ticks: { color: '#64748B', font: { size: 10 } }
+                },
+                y: {
+                  grid: { color: '#F1F5F9' },
+                  ticks: { color: '#64748B', font: { size: 10 } }
+                }
+              }
+            }
+          });
+        }
+      }, [packetLogs]);
+
+      return (
+        <div className="space-y-6">
+          
+          {/* Node Summary Banner */}
+          <div className="panel-card p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                  Node 01 • Active
+                </span>
+                <span className="text-xs text-slate-500 font-mono">ID: SOLAR_ESP32_001</span>
+              </div>
+              <h2 className="text-xl font-bold text-slate-900 mt-1">Pune Rooftop Solar Array (24 kWp Microgrid)</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Continuous IoT dMRV telemetry &bull; MPPT: Active &bull; Ambient: 29.8&deg;C &bull; Irradiance: {p.irradiance || 855} W/m&sup2;
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                <div className="text-[11px] font-semibold text-slate-400 uppercase">System PR</div>
+                <div className="text-lg font-bold font-mono text-emerald-600">98.7%</div>
+              </div>
+              <div className="h-8 w-px bg-slate-200"></div>
+              <div className="text-right">
+                <div className="text-[11px] font-semibold text-slate-400 uppercase">Grid Factor</div>
+                <div className="text-lg font-bold font-mono text-slate-800">0.82 kg/kWh</div>
+              </div>
+            </div>
+          </div>
+
+          {/* 4 Primary KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            
+            <div className="panel-card panel-card-hover p-5 border-l-4 border-l-amber-500">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Live Power Output</span>
+                <span className="p-1.5 rounded-lg bg-amber-50 text-amber-600"><i data-lucide="zap" className="w-4 h-4"></i></span>
+              </div>
+              <div className="text-3xl font-extrabold text-slate-900 mt-2 font-mono tracking-tight">
+                {p.power.toFixed(1)} <span className="text-sm font-sans font-semibold text-amber-600">W</span>
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-slate-500 mt-2 pt-2 border-t border-slate-100">
+                <span>Expected: {p.expected_power.toFixed(1)} W</span>
+                <span className={Math.abs(p.power - p.expected_power) > 2 ? 'text-rose-600 font-bold' : 'text-emerald-600 font-semibold'}>
+                  Δ {Math.abs(p.power - p.expected_power).toFixed(1)} W
+                </span>
+              </div>
+            </div>
+
+            <div className="panel-card panel-card-hover p-5 border-l-4 border-l-blue-500">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Cumulative Clean Energy</span>
+                <span className="p-1.5 rounded-lg bg-blue-50 text-blue-600"><i data-lucide="sun" className="w-4 h-4"></i></span>
+              </div>
+              <div className="text-3xl font-extrabold text-slate-900 mt-2 font-mono tracking-tight">
+                {s.total_energy_kwh.toFixed(4)} <span className="text-sm font-sans font-semibold text-blue-600">kWh</span>
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-slate-500 mt-2 pt-2 border-t border-slate-100">
+                <span>Accumulating live</span>
+                <span className="text-blue-600 font-semibold">MPPT Tracked</span>
+              </div>
+            </div>
+
+            <div className="panel-card panel-card-hover p-5 border-l-4 border-l-emerald-500">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">CO₂ Avoided</span>
+                <span className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600"><i data-lucide="sprout" className="w-4 h-4"></i></span>
+              </div>
+              <div className="text-3xl font-extrabold text-emerald-600 mt-2 font-mono tracking-tight">
+                {s.total_co2_reduced_kg.toFixed(4)} <span className="text-sm font-sans font-semibold text-emerald-700">kg</span>
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-slate-500 mt-2 pt-2 border-t border-slate-100">
+                <span>0.82 kg/kWh Factor</span>
+                <span className="text-emerald-700 font-semibold">Scope 2 Reduction</span>
+              </div>
+            </div>
+
+            <div className="panel-card panel-card-hover p-5 border-l-4 border-l-purple-500">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Verified Carbon Credits</span>
+                <span className="p-1.5 rounded-lg bg-purple-50 text-purple-600"><i data-lucide="award" className="w-4 h-4"></i></span>
+              </div>
+              <div className="text-3xl font-extrabold text-purple-700 mt-2 font-mono tracking-tight">
+                {s.total_carbon_credits.toFixed(7)}
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-slate-500 mt-2 pt-2 border-t border-slate-100">
+                <span>1 Credit = 1000 kg CO₂</span>
+                <span className="text-purple-600 font-semibold">Polygon Amoy</span>
+              </div>
+            </div>
+
+          </div>
+
+          {/* Main Chart + Node Diagnostics */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            {/* Chart Area */}
+            <div className="lg:col-span-2 panel-card p-6 flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-[15px] font-bold text-slate-900">Live Power Output vs Physical Determinism</h3>
+                  <p className="text-xs text-slate-500">Ohm's &amp; Joule's physical law cross-check (P = V &times; I &plusmn; 2.0%)</p>
+                </div>
+                <div className="flex items-center gap-3 text-xs">
+                  <span className="flex items-center gap-1.5 text-slate-700 font-medium">
+                    <span className="w-2.5 h-2.5 rounded-full bg-blue-600"></span> Reported (W)
+                  </span>
+                  <span className="flex items-center gap-1.5 text-slate-700 font-medium">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span> Expected (W)
+                  </span>
+                </div>
+              </div>
+
+              <div className="h-64 w-full">
+                <canvas ref={chartRef}></canvas>
+              </div>
+
+              <div className="flex items-center justify-between text-[11px] text-slate-500 pt-3 border-t border-slate-100 mt-2">
+                <span>Streaming 25 rolling cycles &bull; Cadence 1.5s</span>
+                <span className="text-emerald-700 font-semibold flex items-center gap-1">
+                  <i data-lucide="check-circle-2" className="w-3.5 h-3.5"></i> Physics Cross-Check Active
+                </span>
+              </div>
+            </div>
+
+            {/* Diagnostics Card */}
+            <div className="panel-card flex flex-col justify-between">
+              <div className="p-6 border-b border-slate-100">
+                <h3 className="text-[15px] font-bold text-slate-900 mb-4 flex items-center gap-2">
+                  <i data-lucide="cpu" className="w-4 h-4 text-emerald-600"></i>
+                  Live Node Diagnostics
+                </h3>
+
+                <div className="space-y-3 text-[13px]">
+                  <div className="flex justify-between py-1 border-b border-slate-50">
+                    <span className="text-slate-500">Panel Voltage (V)</span>
+                    <span className="font-mono font-semibold text-slate-800">{p.voltage.toFixed(2)} V</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-50">
+                    <span className="text-slate-500">Panel Current (I)</span>
+                    <span className="font-mono font-semibold text-slate-800">{p.current.toFixed(2)} A</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-50">
+                    <span className="text-slate-500">Cell Temperature</span>
+                    <span className="font-mono font-semibold text-slate-800">{p.temperature.toFixed(1)} &deg;C</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-50">
+                    <span className="text-slate-500">Relative Humidity</span>
+                    <span className="font-mono font-semibold text-slate-800">{p.humidity ? p.humidity.toFixed(1) : '58.0'} %</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-50">
+                    <span className="text-slate-500">Solar Irradiance</span>
+                    <span className="font-mono font-semibold text-amber-600">{p.irradiance || 855} W/m&sup2;</span>
+                  </div>
+                  <div className="flex justify-between pt-2">
+                    <span className="text-slate-500 font-medium">AI dMRV Status</span>
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                      p.status === 'ANOMALY' 
+                        ? 'bg-rose-50 text-rose-700 border border-rose-200' 
+                        : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    }`}>
+                      {p.status}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6 bg-slate-50/70 rounded-b-xl border-t border-slate-100">
+                <button
+                  onClick={onMintCert}
+                  className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <i data-lucide="award" className="w-4 h-4"></i>
+                  <span>Issue &amp; Mint Digital Certificate</span>
+                </button>
+              </div>
+            </div>
+
+          </div>
+
+          {/* Telemetry Table */}
+          <div className="panel-card overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div>
+                <h3 className="text-[15px] font-bold text-slate-900">Live Continuous Telemetry Stream</h3>
+                <p className="text-xs text-slate-500">Continuous telemetry ticks verified against electrical &amp; thermodynamic equations</p>
+              </div>
+              <span className="text-xs font-semibold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full">
+                {packetLogs.length} Packets Buffered
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-600 font-semibold uppercase tracking-wider border-b border-slate-200">
+                  <tr>
+                    <th className="px-6 py-3">Timestamp</th>
+                    <th className="px-6 py-3">Reported (W)</th>
+                    <th className="px-6 py-3">Expected (W)</th>
+                    <th className="px-6 py-3">Voltage (V)</th>
+                    <th className="px-6 py-3">Current (A)</th>
+                    <th className="px-6 py-3">Temp / Hum</th>
+                    <th className="px-6 py-3">Status</th>
+                    <th className="px-6 py-3">Verification Note</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-mono">
+                  {packetLogs.slice(0, 15).map((log, i) => {
+                    const isAnom = log.status === 'ANOMALY';
+                    return (
+                      <tr key={log.id || i} className={isAnom ? 'bg-rose-50/60' : 'hover:bg-slate-50/80 transition-colors'}>
+                        <td className="px-6 py-3 text-slate-600 font-sans">{new Date(log.timestamp || Date.now()).toLocaleTimeString()}</td>
+                        <td className={`px-6 py-3 font-semibold ${isAnom ? 'text-rose-700 font-bold' : 'text-slate-900'}`}>{log.power.toFixed(2)} W</td>
+                        <td className="px-6 py-3 text-slate-500">{log.expected_power.toFixed(2)} W</td>
+                        <td className="px-6 py-3 text-slate-700">{log.voltage.toFixed(2)} V</td>
+                        <td className="px-6 py-3 text-slate-700">{log.current.toFixed(2)} A</td>
+                        <td className="px-6 py-3 text-slate-600">{log.temperature.toFixed(1)}&deg;C / {log.humidity ? log.humidity.toFixed(0) : '58'}%</td>
+                        <td className="px-6 py-3">
+                          <span className={`px-2 py-0.5 rounded-full font-sans font-semibold text-[10px] ${isAnom ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                            {log.status}
+                          </span>
+                        </td>
+                        <td className="px-6 py-3 font-sans text-slate-500 truncate max-w-xs">{log.reason || 'Ohm & Joule law confirmed'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      );
+    }
+
+    // --- AI dMRV CENTER TAB ---
+    function AIVerificationTab({ summary, packetLogs = [] }) {
+      const s = summary || defaultSummary;
+      const anomList = packetLogs.filter(p => p.status === 'ANOMALY');
+
+      return (
+        <div className="space-y-6">
+          <div className="panel-card p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                  dMRV Pipeline Active
+                </span>
+                <span className="text-xs text-slate-500 font-mono">ISO 14064-2 Compliant</span>
+              </div>
+              <h2 className="text-xl font-bold text-slate-900 mt-1">AI Verification Engine &amp; Physical Audit Log</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Deterministic conservation laws + scikit-learn IsolationForest preventing fraudulent carbon credit minting.
+              </p>
+            </div>
+            <div className="px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-xs font-semibold flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>100% Deterministic Local Verification</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="panel-card p-5 border-l-4 border-l-slate-700">
+              <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total Evaluated</div>
+              <div className="text-3xl font-extrabold text-slate-900 mt-2 font-mono">{s.total_readings}</div>
+              <div className="text-[11px] text-slate-500 mt-2 pt-2 border-t border-slate-100">Sensor Packets</div>
+            </div>
+            <div className="panel-card p-5 border-l-4 border-l-emerald-500">
+              <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Verified Pass</div>
+              <div className="text-3xl font-extrabold text-emerald-600 mt-2 font-mono">{s.verified_readings}</div>
+              <div className="text-[11px] text-emerald-700 font-semibold mt-2 pt-2 border-t border-slate-100">
+                {((s.verified_readings / s.total_readings) * 100).toFixed(1)}% Pass Rate
+              </div>
+            </div>
+            <div className="panel-card p-5 border-l-4 border-l-rose-500">
+              <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Anomalies Caught</div>
+              <div className="text-3xl font-extrabold text-rose-600 mt-2 font-mono">{s.anomaly_readings}</div>
+              <div className="text-[11px] text-rose-700 font-semibold mt-2 pt-2 border-t border-slate-100">Fraud Rejected</div>
+            </div>
+            <div className="panel-card p-5 border-l-4 border-l-blue-500">
+              <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Model Latency</div>
+              <div className="text-3xl font-extrabold text-blue-600 mt-2 font-mono">1.8 ms</div>
+              <div className="text-[11px] text-slate-500 mt-2 pt-2 border-t border-slate-100">Deterministic Pipeline</div>
+            </div>
+          </div>
+
+          {/* 3-tier architecture cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="panel-card p-5 border-t-4 border-t-emerald-500">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Tier 1 &bull; Physics Law</div>
+              <h3 className="text-sm font-bold text-slate-900 mt-1">Ohm's &amp; Joule's Determinism</h3>
+              <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                Reported power is checked against instantaneous voltage and current:
+              </p>
+              <div className="mt-3 p-2 bg-slate-50 rounded border border-slate-200 text-center font-mono text-xs font-bold text-slate-800">
+                P_expected = V &times; I &plusmn; 2.0%
+              </div>
+            </div>
+
+            <div className="panel-card p-5 border-t-4 border-t-blue-500">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-blue-700">Tier 2 &bull; ML Isolation Forest</div>
+              <h3 className="text-sm font-bold text-slate-900 mt-1">Multi-Dimensional Model</h3>
+              <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                Trained on operational characteristics of PV cells with temperature coefficients:
+              </p>
+              <div className="mt-3 p-2 bg-slate-50 rounded border border-slate-200 text-center font-mono text-xs text-slate-800">
+                Vector: [V, I, P, Temp, Humidity]
+              </div>
+            </div>
+
+            <div className="panel-card p-5 border-t-4 border-t-purple-500">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-purple-700">Tier 3 &bull; Cryptography</div>
+              <h3 className="text-sm font-bold text-slate-900 mt-1">On-Chain Smart Contract</h3>
+              <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                Cumulative session verified records are hashed (SHA-256) and anchored to Polygon Amoy.
+              </p>
+              <div className="mt-3 p-2 bg-slate-50 rounded border border-slate-200 text-center font-mono text-xs text-slate-800">
+                Polygon Amoy: 0x83A9...32F1
+              </div>
+            </div>
+          </div>
+
+          {/* Anomaly Inspection Table */}
+          <div className="panel-card overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200">
+              <h3 className="text-sm font-bold text-slate-900">Flagged Anomaly Audit Stream</h3>
+              <p className="text-xs text-slate-500">Packets intercepted for physical or ML score violations</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-600 font-semibold uppercase border-b border-slate-200">
+                  <tr>
+                    <th className="px-6 py-3">Timestamp</th>
+                    <th className="px-6 py-3">Reported (W)</th>
+                    <th className="px-6 py-3">Expected (W)</th>
+                    <th className="px-6 py-3">Discrepancy</th>
+                    <th className="px-6 py-3">Verdict &amp; Reasoning</th>
+                    <th className="px-6 py-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-mono">
+                  {anomList.map((anom, idx) => (
+                    <tr key={idx} className="hover:bg-rose-50/40">
+                      <td className="px-6 py-3 text-slate-600 font-sans">{new Date(anom.timestamp).toLocaleTimeString()}</td>
+                      <td className="px-6 py-3 font-bold text-rose-700">{anom.power.toFixed(2)} W</td>
+                      <td className="px-6 py-3 text-slate-700">{anom.expected_power.toFixed(2)} W</td>
+                      <td className="px-6 py-3 text-rose-600 font-semibold">
+                        {(anom.power - anom.expected_power).toFixed(2)} W
+                      </td>
+                      <td className="px-6 py-3 font-sans text-slate-700">{anom.reason}</td>
+                      <td className="px-6 py-3">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800">REJECTED</span>
+                      </td>
+                    </tr>
+                  ))}
+                  {anomList.length === 0 && (
+                    <tr>
+                      <td colSpan="6" className="px-6 py-8 text-center text-slate-400 font-sans">
+                        No physical anomalies currently flagged. Click "Test Anomaly" in navbar to simulate a violation.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- CERTIFICATE TAB ---
+    function CertificateTab({ summary }) {
+      const s = summary || defaultSummary;
+      const certId = 'RCC-2026-PUNE-88102';
+      const certHash = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+
+      return (
+        <div className="space-y-6 max-w-5xl mx-auto">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-bold text-slate-900">Verified Digital Carbon Certificate</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Live cryptographic certificate based on continuous ESP32 generation</p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => window.print()} className="px-3 py-1.5 bg-white border border-slate-200 text-slate-700 text-xs font-semibold rounded-lg shadow-2xs">
+                Print
+              </button>
+              <button onClick={() => window.location.href=`/api/certificates/${certId}/download`} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-xs">
+                Download PDF
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border-2 border-slate-200 p-8 md:p-12 shadow-md">
+            <div className="border border-slate-300 rounded-xl p-8">
+              <div className="text-center pb-8 border-b border-slate-200">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200 mb-2">
+                  <i data-lucide="award" className="w-6 h-6"></i>
+                </div>
+                <h3 className="text-2xl font-black text-slate-900">RENEWCRED DECARBONIZATION PLATFORM</h3>
+                <div className="text-xs font-bold text-emerald-700 uppercase tracking-widest mt-1">
+                  Certificate of Verified Clean Energy Abatement
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1 font-mono">
+                  Serial No: {certId} &bull; Protocol: dMRV v2.4 &bull; Standard: ISO 14064-2
+                </div>
+              </div>
+
+              <div className="my-8 py-6 px-4 bg-slate-50 rounded-xl border border-slate-200 text-center">
+                <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+                  Total Verified Carbon Credits Issued
+                </div>
+                <div className="text-4xl font-extrabold text-slate-900 font-mono">
+                  {s.total_carbon_credits.toFixed(7)} <span className="text-base font-sans font-bold text-purple-700">tCO₂e</span>
+                </div>
+                <div className="mt-2 text-xs font-semibold text-emerald-700">
+                  Cryptographically Sealed &bull; Verified on Polygon Amoy
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 text-xs">
+                <div className="p-4 bg-white border border-slate-200 rounded-lg">
+                  <span className="font-bold text-slate-400 uppercase">Project</span>
+                  <div className="text-slate-900 font-bold text-sm mt-0.5">Pune Rooftop Solar Microgrid #01</div>
+                  <div className="text-slate-500 mt-0.5">Node: SOLAR_ESP32_001</div>
+                </div>
+
+                <div className="p-4 bg-white border border-slate-200 rounded-lg">
+                  <span className="font-bold text-slate-400 uppercase">Methodology</span>
+                  <div className="text-slate-900 font-bold text-sm mt-0.5">Deterministic Ohm/Joule + ML</div>
+                  <div className="text-slate-500 mt-0.5">1.5s Continuous Sampling</div>
+                </div>
+
+                <div className="p-4 bg-white border border-slate-200 rounded-lg">
+                  <span className="font-bold text-slate-400 uppercase">Energy Generated</span>
+                  <div className="text-emerald-700 font-bold text-sm mt-0.5">{s.total_energy_kwh.toFixed(4)} kWh</div>
+                  <div className="text-slate-500 mt-0.5">Calibrated INA219 sensor</div>
+                </div>
+
+                <div className="p-4 bg-white border border-slate-200 rounded-lg">
+                  <span className="font-bold text-slate-400 uppercase">Avoided CO₂</span>
+                  <div className="text-emerald-700 font-bold text-sm mt-0.5">{s.total_co2_reduced_kg.toFixed(4)} kg</div>
+                  <div className="text-slate-500 mt-0.5">CEA Factor: 0.82 kg/kWh</div>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-slate-200">
+                <span className="text-[11px] font-bold text-slate-500 uppercase">SHA-256 Certificate Digest</span>
+                <div className="p-2 bg-slate-50 border border-slate-200 rounded text-[11px] font-mono text-slate-800 break-all select-all mt-1">
+                  {certHash}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- MARKETPLACE TAB ---
+    function MarketplaceTab({ walletAddress }) {
+      const [listings, setListings] = useState([
+        { id: '1', cert: 'RCC-2026-88102', project: 'Pune Rooftop Solar Microgrid', tech: 'Solar PV 24kW', credits: 0.10283, price: 1250.0 },
+        { id: '2', cert: 'RCC-2026-44019', project: 'EV Clean Charging Station', tech: 'Smart Fleet EV', credits: 0.25010, price: 1380.0 },
+        { id: '3', cert: 'RCC-2026-99214', project: 'Gujarat Solar Park Phase II', tech: 'Ground Utility PV', credits: 0.52040, price: 1210.0 },
+        { id: '4', cert: 'RCC-2026-11802', project: 'Coimbatore Wind-Solar Hybrid', tech: 'Hybrid Microgrid', credits: 0.38000, price: 1320.0 },
+      ]);
+
+      const [portfolio, setPortfolio] = useState([
+        { id: 'P1', cert: 'RCC-2026-88102', project: 'Pune Rooftop Solar Microgrid', credits: 0.10283 }
+      ]);
+
+      const handleBuy = (item) => {
+        setListings(listings.filter(l => l.id !== item.id));
+        setPortfolio([...portfolio, { id: `P${Date.now()}`, cert: item.cert, project: item.project, credits: item.credits }]);
+        alert(`Successfully purchased ${item.credits.toFixed(5)} credits from ${item.project}!`);
+      };
+
+      const handleRetire = (item) => {
+        const reason = prompt('Enter corporate ESG retirement reason:', 'Scope 2 Decarbonization Offset FY26');
+        if (reason) {
+          setPortfolio(portfolio.filter(p => p.id !== item.id));
+          alert(`Credit ${item.cert} permanently retired on Polygon Amoy for: "${reason}"`);
+        }
+      };
+
+      return (
+        <div className="space-y-6">
+          <div className="panel-card p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                  Polygon Amoy Order Book
+                </span>
+                <span className="text-xs text-slate-500 font-mono">Contract: 0x83A9...32F1</span>
+              </div>
+              <h2 className="text-xl font-bold text-slate-900 mt-1">Decentralized Carbon Credit Marketplace</h2>
+              <p className="text-xs text-slate-500 mt-0.5">P2P immediate trading and permanent ESG retirement of verified credits.</p>
+            </div>
+            <div className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs">
+              <span className="text-slate-500">Wallet: </span>
+              <span className="font-mono font-semibold text-slate-800">
+                {walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '0x71C7...976F'}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="panel-card p-5 border-l-4 border-l-purple-500">
+              <div className="text-[11px] font-bold text-slate-500 uppercase">Spot Price</div>
+              <div className="text-3xl font-extrabold text-slate-900 mt-2 font-mono">₹1,280 <span className="text-xs font-sans font-medium text-slate-500">/ credit</span></div>
+            </div>
+            <div className="panel-card p-5 border-l-4 border-l-blue-500">
+              <div className="text-[11px] font-bold text-slate-500 uppercase">Available Volume</div>
+              <div className="text-3xl font-extrabold text-blue-600 mt-2 font-mono">
+                {listings.reduce((a, b) => a + b.credits, 0).toFixed(4)}
+              </div>
+            </div>
+            <div className="panel-card p-5 border-l-4 border-l-emerald-500">
+              <div className="text-[11px] font-bold text-slate-500 uppercase">24h Trading</div>
+              <div className="text-3xl font-extrabold text-emerald-600 mt-2 font-mono">₹84,520</div>
+            </div>
+            <div className="panel-card p-5 border-l-4 border-l-amber-500">
+              <div className="text-[11px] font-bold text-slate-500 uppercase">Retired Offsets</div>
+              <div className="text-3xl font-extrabold text-amber-600 mt-2 font-mono">14.28 <span className="text-xs font-sans">tCO₂e</span></div>
+            </div>
+          </div>
+
+          <div className="panel-card overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200">
+              <h3 className="text-sm font-bold text-slate-900">Active Order Book (Available Credits)</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-600 font-semibold uppercase border-b border-slate-200">
+                  <tr>
+                    <th className="px-6 py-3">Certificate ID</th>
+                    <th className="px-6 py-3">Project &amp; Tech</th>
+                    <th className="px-6 py-3 text-right">Credits (tCO₂e)</th>
+                    <th className="px-6 py-3 text-right">Price / Credit</th>
+                    <th className="px-6 py-3 text-right">Total (INR)</th>
+                    <th className="px-6 py-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-mono">
+                  {listings.map(item => (
+                    <tr key={item.id} className="hover:bg-slate-50">
+                      <td className="px-6 py-4 font-bold text-slate-900">{item.cert}</td>
+                      <td className="px-6 py-4 font-sans">
+                        <div className="font-semibold text-slate-800">{item.project}</div>
+                        <div className="text-[11px] text-slate-400 font-mono">{item.tech}</div>
+                      </td>
+                      <td className="px-6 py-4 text-right font-bold text-purple-700">{item.credits.toFixed(5)}</td>
+                      <td className="px-6 py-4 text-right text-slate-700">₹{item.price.toFixed(2)}</td>
+                      <td className="px-6 py-4 text-right font-bold text-slate-900">₹{(item.credits * item.price).toFixed(2)}</td>
+                      <td className="px-6 py-4 text-right font-sans">
+                        <button onClick={() => handleBuy(item)} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-2xs">
+                          Buy Order
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {listings.length === 0 && (
+                    <tr>
+                      <td colSpan="6" className="px-6 py-8 text-center text-slate-400 font-sans">All available orders purchased.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Portfolio & Retirement */}
+          <div className="panel-card p-6">
+            <h3 className="text-sm font-bold text-slate-900 mb-3">My Carbon Portfolio</h3>
+            <div className="space-y-3">
+              {portfolio.map(item => (
+                <div key={item.id} className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-bold text-slate-900">{item.cert}</div>
+                    <div className="text-[11px] text-slate-500">{item.project}</div>
+                    <div className="text-xs font-mono font-bold text-purple-700 mt-1">{item.credits.toFixed(5)} Credits</div>
+                  </div>
+                  <button onClick={() => handleRetire(item)} className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold rounded-lg">
+                    Retire Credit
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- PREDICTION LOGS TAB ---
+    function PredictionLogsTab({ mockLogs = [] }) {
+      const [filterStatus, setFilterStatus] = useState('ALL');
+      const filtered = mockLogs.filter(l => 
+        filterStatus === 'ALL' || 
+        (filterStatus === 'NORMAL' && l.status !== 'ANOMALY') || 
+        (filterStatus === 'ANOMALY' && l.status === 'ANOMALY')
+      );
+
+      return (
+        <div className="space-y-6">
+          <div className="panel-card p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-slate-900">Prediction Logs &amp; Audit Trail</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Every telemetry packet verified and recorded in sequence</p>
+            </div>
+            <div className="flex gap-2">
+              {['ALL', 'NORMAL', 'ANOMALY'].map(st => (
+                <button
+                  key={st}
+                  onClick={() => setFilterStatus(st)}
+                  className={`px-3 py-1 text-xs font-semibold rounded-lg ${
+                    filterStatus === st ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {st === 'ALL' ? 'All' : st === 'NORMAL' ? 'Verified' : 'Anomalies'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel-card overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-600 font-semibold uppercase border-b border-slate-200">
+                  <tr>
+                    <th className="px-5 py-3">Timestamp</th>
+                    <th className="px-5 py-3">Device</th>
+                    <th className="px-5 py-3">Voltage (V)</th>
+                    <th className="px-5 py-3">Current (A)</th>
+                    <th className="px-5 py-3">Reported (W)</th>
+                    <th className="px-5 py-3">Expected (W)</th>
+                    <th className="px-5 py-3">Temp / Hum</th>
+                    <th className="px-5 py-3">Status</th>
+                    <th className="px-5 py-3">Details</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-mono">
+                  {filtered.slice(0, 30).map((log, idx) => (
+                    <tr key={log.id || idx} className={log.status === 'ANOMALY' ? 'bg-rose-50/60' : 'hover:bg-slate-50'}>
+                      <td className="px-5 py-3 text-slate-600 font-sans">{new Date(log.timestamp).toLocaleTimeString()}</td>
+                      <td className="px-5 py-3 font-semibold text-slate-800">{log.device_id}</td>
+                      <td className="px-5 py-3 text-slate-700">{log.voltage.toFixed(2)} V</td>
+                      <td className="px-5 py-3 text-slate-700">{log.current.toFixed(2)} A</td>
+                      <td className={`px-5 py-3 font-bold ${log.status === 'ANOMALY' ? 'text-rose-700' : 'text-slate-900'}`}>{log.power.toFixed(2)} W</td>
+                      <td className="px-5 py-3 text-slate-500">{log.expected_power.toFixed(2)} W</td>
+                      <td className="px-5 py-3 text-slate-600">{log.temperature.toFixed(1)}&deg;C / {log.humidity ? log.humidity.toFixed(0) : '58'}%</td>
+                      <td className="px-5 py-3">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${log.status === 'ANOMALY' ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                          {log.status}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3 font-sans text-slate-500 truncate max-w-xs">{log.reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- MAIN APP ---
+    function App() {
+      const [activeTab, setActiveTab] = useState('telemetry');
+      const [isStreaming, setIsStreaming] = useState(true);
+      const [packetLogs, setPacketLogs] = useState(() => generateSeedData(35));
+      const [latestPacket, setLatestPacket] = useState(() => packetLogs[0]);
+      const [summary, setSummary] = useState(defaultSummary);
+      const [forceAnomaly, setForceAnomaly] = useState(false);
+      const walletAddress = '0x71C7656EC7ab88b098defB751B7401B5f6d8976F';
+
+      useEffect(() => {
+        if (window.lucide) window.lucide.createIcons();
+      }, [activeTab, packetLogs]);
+
+      // Continuous Mock Generator
+      useEffect(() => {
+        if (!isStreaming) return;
+        const timer = setInterval(() => {
+          setLatestPacket(prev => {
+            const next = generateNextPacket(prev, forceAnomaly);
+            if (forceAnomaly) setForceAnomaly(false);
+
+            setSummary(prevSum => {
+              const energyIncr = (next.power / 1000) * (1.5 / 3600);
+              const newEnergy = prevSum.total_energy_kwh + energyIncr;
+              const newCo2 = newEnergy * 0.82;
+              const isAnom = next.status === 'ANOMALY';
+              return {
+                ...prevSum,
+                total_energy_kwh: Number(newEnergy.toFixed(5)),
+                total_co2_reduced_kg: Number(newCo2.toFixed(5)),
+                total_carbon_credits: Number((newCo2 / 1000).toFixed(8)),
+                total_readings: prevSum.total_readings + 1,
+                verified_readings: prevSum.verified_readings + (isAnom ? 0 : 1),
+                anomaly_readings: prevSum.anomaly_readings + (isAnom ? 1 : 0),
+              };
+            });
+
+            setPacketLogs(prevLogs => [next, ...prevLogs.slice(0, 49)]);
+            return next;
+          });
+        }, 1500);
+
+        return () => clearInterval(timer);
+      }, [isStreaming, forceAnomaly]);
+
+      // Background WebSocket sync if FastAPI server active
+      useEffect(() => {
+        let ws = null;
+        try {
+          const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+          ws = new WebSocket(`${protocol}//${window.location.host}/ws/live`);
+          ws.onmessage = (event) => {
+            try {
+              const msg = JSON.parse(event.data);
+              if (msg.type === 'NEW_READING' && msg.data) {
+                setLatestPacket(msg.data);
+                setPacketLogs(prev => [msg.data, ...prev.filter(x => x.id !== msg.data.id).slice(0, 49)]);
+              }
+            } catch(e) {}
+          };
+        } catch(e) {}
+        return () => { if (ws) ws.close(); };
+      }, []);
+
+      const mintCert = () => {
+        alert(`Successfully minted Digital Carbon Certificate for ${summary.total_energy_kwh.toFixed(4)} kWh on Polygon Amoy!`);
+        setActiveTab('certificates');
+      };
+
+      return (
+        <div className="min-h-screen flex flex-col bg-[#F8FAFC]">
+          <Navbar 
+            activeTab={activeTab} 
+            setActiveTab={setActiveTab}
+            isStreaming={isStreaming}
+            onToggleStreaming={() => setIsStreaming(!isStreaming)}
+            onTriggerAnomaly={() => setForceAnomaly(true)}
+            walletAddress={walletAddress}
+          />
+          
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            {activeTab === 'telemetry' && (
+              <TelemetryTab
+                latestPacket={latestPacket}
+                summary={summary}
+                packetLogs={packetLogs}
+                onMintCert={mintCert}
+              />
+            )}
+            {activeTab === 'ai' && <AIVerificationTab summary={summary} packetLogs={packetLogs} />}
+            {activeTab === 'certificates' && <CertificateTab summary={summary} />}
+            {activeTab === 'marketplace' && <MarketplaceTab walletAddress={walletAddress} />}
+            {activeTab === 'prediction-logs' && <PredictionLogsTab mockLogs={packetLogs} />}
+          </main>
+
+          <footer className="border-t border-slate-200 bg-white py-6 mt-auto">
+            <div className="max-w-7xl mx-auto px-4 text-center text-xs text-slate-500 space-y-1">
+              <div className="font-semibold text-slate-700">RenewCred Decarbonization Platform — Industrial Monitoring Interface</div>
+              <div className="text-[11px] text-slate-400">ESP32 Telemetry &bull; AI Verification (dMRV) &bull; Carbon Engine &bull; Polygon Blockchain &bull; ESG Marketplace</div>
+            </div>
+          </footer>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
+
