@@ -1,0 +1,30 @@
+# Local credentials and hardware configuration
+.env
+.env.*
+!.env.example
+firmware/config.h
+# Python runtime
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+# Local data and generated certificates
+*.db
+*.db-*
+*.sqlite*
+carbon_calculation_sessions.json
+*.pdf
+# Frontend dependencies and builds
+node_modules/
+dist/
+.next/
+out/
+coverage/
+# Local tools and editor state
+.verify-*
+.vscode/
+.idea/
+*.log
+.DS_Store
+Thumbs.db
